@@ -67,14 +67,14 @@ void colorComponents(unsigned char *image, int width, int height, int epsilon) {
             }
         }
     }
-    char *output_filename = "output3.png";
+    char *output_filename = "output.png";
     lodepng_encode32_file(output_filename, image, width, height);
 }
 
 
 int main() {
     int width = 0, height = 0;
-    char *filename = "skull3.png";
+    char *filename = "input.png";
     char *image = load_png_file(filename, &width, &height);
     unsigned char *result = malloc(width * height * 4 * sizeof(unsigned char));
 
