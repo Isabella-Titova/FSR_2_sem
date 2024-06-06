@@ -2,6 +2,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 char *load_png_file(const char *filename, int *width, int *height) {
     unsigned char *image = NULL;
@@ -13,110 +14,181 @@ char *load_png_file(const char *filename, int *width, int *height) {
     return (image);
 }
 
-void floodFill(unsigned char *image, int x, int y, int newColor1, int newColor2, int newColor3, int oldColor, int width,
-               int height) {
-    int dx[] = {-1, 0, 1, 0};
-    int dy[] = {0, 1, 0, -1};
+typedef struct Node {
+    unsigned char r, g, b, a;
+    struct Node *up, *down, *left, *right;
+    int visited;
+    int component;
+} Node;
 
-    int *stackX = malloc(width * height * sizeof(int));
-    int *stackY = malloc(width * height * sizeof(int));
-    long top = 0;
+double color_difference(Node* x, Node* y) {
+    return abs(x->r - y->r);
+}
 
-    stackX[top] = x;
-    stackY[top] = y;
-    top++;
+Node* create_graph(unsigned char *image, int *width, int *height) {
 
-    while (top > 0) {
-        top--;
-        int px = stackX[top];
-        int py = stackY[top];
+    Node* nodes = malloc(*width * *height * sizeof(Node));
 
-        if (px < 0 || px >= width || py < 0 || py >= height)
-            continue;
 
-        if (image[(py * width + px) * 4] > oldColor)
-            continue;
-
-        image[(py * width + px) * 4] = newColor1;
-        image[(py * width + px) * 4 + 1] = newColor2;
-        image[(py * width + px) * 4 + 2] = newColor3;
-
-        for (int i = 0; i < 4; i++) {
-            int nx = px + dx[i];
-            int ny = py + dy[i];
-            if (nx > 0 && nx < width && ny > 0 && ny < height && image[(ny * width + nx) * 4] <= oldColor) {
-                stackX[top] = nx;
-                stackY[top] = ny;
-                top++;
-            }
+    for (unsigned y = 0; y < *height; ++y) {
+        for (unsigned x = 0; x < *width; ++x) {
+            Node* node = &nodes[y * *width + x];
+            unsigned char* pixel = &image[(y * *width + x) * 4];
+            node->r = pixel[0];
+            node->g = pixel[1];
+            node->b = pixel[2];
+            node->a = pixel[3];
+            node->up = y > 0 ? &nodes[(y - 1) * *width + x] : NULL;
+            node->down = y < *height - 1 ? &nodes[(y + 1) * *width + x] : NULL;
+            node->left = x > 0 ? &nodes[y * *width + (x - 1)] : NULL;
+            node->right = x < *width - 1 ? &nodes[y * *width + (x + 1)] : NULL;
+            node->visited = 0;
+            node->component = 0;
         }
     }
-    free(stackX);
-    free(stackY);
+
+    return nodes;
 }
 
 
-void colorComponents(unsigned char *image, int width, int height, int epsilon) {
-    for (int y = 1; y < height - 1; y++) {
-        for (int x = 1; x < width - 1; x++) {
-            if (image[4 * (y * width + x)] < epsilon) {
-                floodFill(image, x, y, rand() % (255 - epsilon * 2) + epsilon * 2, \
-                rand() % (255 - epsilon * 2) + epsilon * 2, \
-                rand() % (255 - epsilon * 2) + epsilon * 2, epsilon, width, height);
+typedef struct Stack {
+    Node* data;
+    struct Stack* next;
+} Stack;
 
+Stack* createStack(Node* data) {
+    Stack* stack = (Stack*)malloc(sizeof(Stack));
+    stack->data = data;
+    stack->next = NULL;
+    return stack;
+}
+
+void push(Stack** stack, Node* data) {
+    Stack* newStack = createStack(data);
+//    printf("f");
+    newStack->next = *stack;
+    *stack = newStack;
+}
+
+Node* pop(Stack** stack) {
+    if (*stack == NULL) {
+        return NULL;
+    }
+    Stack* temp = *stack;
+    Node* node = temp->data;
+    *stack = (*stack)->next;
+    free(temp);
+    return node;
+}
+
+void dfs(Node* node, double epsilon, int component) {
+    Stack* stack = createStack(node);
+    int cnt = 0;
+    while (stack) {
+        cnt++;
+        Node* current = pop(&stack);
+        if (current->visited) {
+            continue;
+        }
+        current->visited = 1;
+        current->component = component;
+//        printf("%d\n", cnt);
+
+        if (current->up && !current->up->visited && color_difference(current, current->up) < epsilon) {
+            push(&stack, current->up);
+        }
+        if (current->down && !current->down->visited && color_difference(current, current->down) < epsilon) {
+
+            push(&stack, current->down);
+        }
+        if (current->left && !current->left->visited && color_difference(current, current->left) < epsilon) {
+            push(&stack, current->left);
+        }
+        if (current->right && !current->right->visited && color_difference(current, current->right) < epsilon) {
+            push(&stack, current->right);
+        }
+    }
+}
+
+
+void find_components(Node* nodes, int width, int height, double epsilon) {
+    int component = 0;
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            Node* node = &nodes[y * width + x];
+            if (!node->visited && node->r > 20) {
+//                printf("%d %d %d\n", y, x, node->r);
+                dfs(node, epsilon, component);
+                component++;
             }
         }
     }
-    char *output_filename = "output.png";
-    lodepng_encode32_file(output_filename, image, width, height);
+}
+
+void color_components(Node* nodes, unsigned char *image, int width, int height) {
+    srand(time(0));
+    int max_component = 0;
+    for (int i = 0; i < width * height; i++) {
+        if (nodes[i].component > max_component) {
+            max_component = nodes[i].component;
+        }
+    }
+    printf("%d", max_component);
+
+    unsigned char* colors = malloc((max_component + 1) * 3);
+    for (int i = 0; i <= max_component; i++) {
+        colors[i * 3 + 0] = rand() % 256;
+        colors[i * 3 + 1] = rand() % 256;
+        colors[i * 3 + 2] = rand() % 256;
+    }
+
+    for (int i = 0; i < width * height; i++) {
+        Node* p = &nodes[i];
+        if (p->r > 20) {
+            image[4 * i + 0] = colors[p->component * 3 + 0];
+            image[4 * i + 1] = colors[p->component * 3 + 1];
+            image[4 * i + 2] = colors[p->component * 3 + 2];
+            image[4 * i + 3] = 255;
+        }
+        else{
+            image[4 * i + 0] = 0;
+            image[4 * i + 1] = 0;
+            image[4 * i + 2] = 0;
+            image[4 * i + 3] = 255;
+        }
+    }
+
+    free(colors);
+}
+
+
+void main_color_border(unsigned char* image, int w, int h, int epsilon) {
+    Node* nodes = create_graph(image, &w, &h);
+    find_components(nodes, w, h, epsilon);
+    color_components(nodes, image, w, h);
+
+    free(nodes);
 }
 
 
 int main() {
     int width = 0, height = 0;
     char *filename = "input.png";
-    char *image = load_png_file(filename, &width, &height);
-    unsigned char *result = malloc(width * height * 4 * sizeof(unsigned char));
+    unsigned char *image = load_png_file(filename, &width, &height);
 
-    int gx[3][3] = {{-1, 0, 1},
-                    {-2, 0, 2},
-                    {-1, 0, 1}};
-    int gy[3][3] = {{1,  2,  1},
-                    {0,  0,  0},
-                    {-1, -2, -1}};
-
-
-    for (int y = 1; y < height - 1; y++) {
-        for (int x = 1; x < width - 1; x++) {
-            int sumX = 0, sumY = 0;
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dx = -1; dx <= 1; dx++) {
-                    int index = ((y + dy) * width + (x + dx)) * 4;
-                    int gray = (image[index] + image[index + 1] + image[index + 2]) / 3;
-                    sumX += gx[dy + 1][dx + 1] * gray;
-                    sumY += gy[dy + 1][dx + 1] * gray;
-                }
-            }
-            int magnitude = sqrt(sumX * sumX + sumY * sumY);
-            if (magnitude > 255) magnitude = 255;
-            if (magnitude < 0) magnitude = 0;
-
-            int resultIndex = (y * width + x) * 4;
-            result[resultIndex] = (unsigned char) magnitude;
-            result[resultIndex + 1] = (unsigned char) magnitude;
-            result[resultIndex + 2] = (unsigned char) magnitude;
-            result[resultIndex + 3] = image[resultIndex + 3];
-        }
+    for (int i = 0; i < width * height; i++) {
+        unsigned char gr;
+        gr = (image[4 * i + 1] + image[4 * i + 2] + image[4 * i + 3])/3 ;
+        image[4*i + 1] = gr;
+        image[4*i + 2] = gr;
+        image[4*i + 3] = gr;
     }
 
-    for (int i = 0; i < width * height * 4; i++) {
-        image[i] = result[i];
-    }
 
-    colorComponents(image, width, height, 40);
+    main_color_border(image, width, height, 3);
+    char *output_filename = "output.png";
+    lodepng_encode32_file(output_filename, image, width, height);
 
-    free(result);
     free(image);
     return 0;
 }
-
